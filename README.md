@@ -9,7 +9,6 @@ Copy `PaneFilter macro.lua` to `%APPDATA%\Roaming\Far Manager\Profile\Macros\scr
 Features
 --------
 
-- Opens from the plugin menu and from the `panefilter` command prefix.
 - Accepts a startup filter from `Plugin.Call(...)` macro arguments.
 - Filters live inside a FAR file panel.
 - Supports case-insensitive substring matching and `*` / `?` wildcard matching.
