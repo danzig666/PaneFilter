@@ -1,0 +1,9 @@
+.Language=English,English
+
+"PaneFilter"
+"Panels are not available in the current FAR mode."
+"The active panel is not a regular file panel."
+"The current directory does not contain any files or directories."
+"Use PaneFilter from a normal filesystem panel."
+"PaneFilter [%s]  %d/%d"
+"Type to filter, * and ? supported, Enter to open, Del to jump and close, Backspace or Esc to exit, Ctrl-R to refresh"

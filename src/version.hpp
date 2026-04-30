@@ -1,0 +1,20 @@
+#ifdef _WIN64
+#define PLATFORM " x64"
+#elif defined _WIN32
+#define PLATFORM " x86"
+#else
+#define PLATFORM ""
+#endif
+
+#define PLUGIN_VER_MAJOR 1
+#define PLUGIN_VER_MINOR 0
+#define PLUGIN_VER_PATCH 0
+#define PLUGIN_DESC L"PaneFilter for Far Manager 3" PLATFORM
+#define PLUGIN_NAME L"PaneFilter"
+#define PLUGIN_FILENAME L"PaneFilter.dll"
+#define PLUGIN_COPYRIGHT L"https://openai.com"
+
+#define STRINGIZE2(s) #s
+#define STRINGIZE(s) STRINGIZE2(s)
+
+#define PLUGIN_VERSION STRINGIZE(PLUGIN_VER_MAJOR) "." STRINGIZE(PLUGIN_VER_MINOR) "." STRINGIZE(PLUGIN_VER_PATCH)

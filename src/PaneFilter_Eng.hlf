@@ -1,0 +1,32 @@
+.Language=English,English
+.PluginContents=Contents
+.Options CtrlStartPosChar=^<wrap>
+
+@Contents
+$^#PaneFilter ${PLUGIN_VERSION}#
+$^#Contents#
+
+PaneFilter opens a FAR plugin panel backed by the current directory.
+
+Type to filter the panel contents.
+Matching is case-insensitive.
+If the filter contains #*# or #?#, wildcard matching is used.
+
+#Enter#
+Close PaneFilter and act in the real panel.
+Directories change the real panel directory.
+Files are positioned in the real panel and opened as if Enter was pressed there.
+
+#Backspace#
+Delete the last character from the filter.
+If the filter becomes empty, PaneFilter closes and returns to the original directory.
+
+#Del#
+Close PaneFilter and jump to the currently selected item in the real panel.
+If the filter is already empty, PaneFilter closes and returns to the original directory.
+
+#Ctrl-R#
+Refresh the directory contents.
+
+#Esc#
+Close PaneFilter and return to the original directory.
