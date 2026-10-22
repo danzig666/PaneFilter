@@ -39,6 +39,7 @@ variants and places the results in `bin\x86` and `bin\x64`.
 Releases
 --------
 
-Pushing a tag named `vX.Y.Z` builds both variants and publishes a GitHub
-release with ready-to-install zips (plugin files, macro, README) and separate
-PDB zips for debugging. Keep `src/version.hpp` in sync with the tag.
+Pushing a tag named `vX.Y.Z`, or running the Build workflow manually with
+its `tag` input set, builds both variants and publishes a GitHub release with
+ready-to-install zips (plugin files, macro, README) and separate PDB zips for
+debugging. Keep `src/version.hpp` in sync with the tag.

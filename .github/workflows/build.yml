@@ -6,6 +6,11 @@ on:
     tags: ['v*']
   pull_request:
   workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Create a release with this tag (e.g. v1.0.0); leave empty to only build'
+        required: false
+        default: ''
 
 jobs:
   build:
@@ -37,11 +42,13 @@ jobs:
           path: bin/${{ matrix.arch }}
 
   release:
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.tag != '')
     needs: build
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    env:
+      TAG: ${{ inputs.tag || github.ref_name }}
     steps:
       - uses: actions/checkout@v4
 
@@ -59,15 +66,17 @@ jobs:
                artifacts/PaneFilter-$arch/PaneFilter_Eng.hlf \
                artifacts/PaneFilter-$arch/File_ID.diz \
                "PaneFilter macro.lua" README.md LICENSE "$dir/"
-            (cd "package-$arch" && zip -r "../PaneFilter-${GITHUB_REF_NAME}-$arch.zip" PaneFilter)
-            (cd artifacts/PaneFilter-$arch && zip "../../PaneFilter-${GITHUB_REF_NAME}-$arch-pdb.zip" PaneFilter.pdb)
+            (cd "package-$arch" && zip -r "../PaneFilter-${TAG}-$arch.zip" PaneFilter)
+            (cd artifacts/PaneFilter-$arch && zip "../../PaneFilter-${TAG}-$arch-pdb.zip" PaneFilter.pdb)
           done
 
       - uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ env.TAG }}
+          target_commitish: ${{ github.sha }}
           generate_release_notes: true
           files: |
-            PaneFilter-${{ github.ref_name }}-x86.zip
-            PaneFilter-${{ github.ref_name }}-x64.zip
-            PaneFilter-${{ github.ref_name }}-x86-pdb.zip
-            PaneFilter-${{ github.ref_name }}-x64-pdb.zip
+            PaneFilter-${{ env.TAG }}-x86.zip
+            PaneFilter-${{ env.TAG }}-x64.zip
+            PaneFilter-${{ env.TAG }}-x86-pdb.zip
+            PaneFilter-${{ env.TAG }}-x64-pdb.zip
