@@ -7,10 +7,14 @@ $^#PaneFilter ${PLUGIN_VERSION}#
 $^#Contents#
 
 PaneFilter opens a FAR plugin panel backed by the current directory.
+It can be started from the plugins menu, from a macro, or from the
+command line with the #panefilter:# prefix (for example #panefilter:*.txt#).
 
 Type to filter the panel contents.
 Matching is case-insensitive.
 If the filter contains #*# or #?#, wildcard matching is used.
+#Alt+-# also types #*#.
+Characters that would leave the panel empty are ignored.
 
 #Enter#
 Close PaneFilter and act in the real panel.
@@ -19,14 +23,17 @@ Files are positioned in the real panel and opened as if Enter was pressed there.
 
 #Backspace#
 Delete the last character from the filter.
-If the filter becomes empty, PaneFilter closes and returns to the original directory.
+If the filter becomes empty, PaneFilter closes and returns to the original item.
 
 #Del#
 Close PaneFilter and jump to the currently selected item in the real panel.
-If the filter is already empty, PaneFilter closes and returns to the original directory.
+If the filter is already empty, PaneFilter closes and returns to the original item.
 
 #Ctrl-R#
 Refresh the directory contents.
 
 #Esc#
-Close PaneFilter and return to the original directory.
+Close PaneFilter and return to the original directory and item.
+
+Other FAR file operations (F3, F4, F5, F6, F8, ...) work on the real files;
+the panel is rescanned afterwards.

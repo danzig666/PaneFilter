@@ -12,7 +12,7 @@
 #define PLUGIN_DESC L"PaneFilter for Far Manager 3" PLATFORM
 #define PLUGIN_NAME L"PaneFilter"
 #define PLUGIN_FILENAME L"PaneFilter.dll"
-#define PLUGIN_COPYRIGHT L"https://openai.com"
+#define PLUGIN_COPYRIGHT L"Copyright (c) D4nz1g"
 
 #define STRINGIZE2(s) #s
 #define STRINGIZE(s) STRINGIZE2(s)

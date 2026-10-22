@@ -8,5 +8,5 @@ enum
 	MNoEntries,
 	MInstructions,
 	MPanelTitle,
-	MHelpLine,
+	MCannotRead,
 };
