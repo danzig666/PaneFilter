@@ -23,22 +23,16 @@ namespace
 		bool IsDirectory;
 	};
 
-	struct PanelItemSnapshot
-	{
-		std::wstring FileName;
-		uintptr_t FileAttributes;
-	};
-
 	struct PanelState
 	{
 		std::wstring SourceDirectory;
-		std::wstring OriginalDirectory;
 		std::wstring CurrentName;
 		std::wstring FilterText;
 		std::wstring PanelTitle;
 		std::vector<SourceEntry> Entries;
 		std::vector<size_t> FilteredIndices;
 		bool ShowHidden;
+		bool SkipRescan;
 		OPENPANELINFO_SORTMODES SortMode;
 		intptr_t SortOrder;
 	};
@@ -78,23 +72,38 @@ namespace
 		return directory + L'\\' + name;
 	}
 
-	std::wstring ParentPath(const std::wstring& path)
+	bool IsAbsolutePath(const std::wstring& path)
 	{
-		if (path.size() <= 3)
+		return (path.size() > 1 && path[1] == L':') || (path.size() > 1 && IsPathSeparator(path[0]) && IsPathSeparator(path[1]));
+	}
+
+	std::wstring GetRootPath(const std::wstring& path)
+	{
+		if (path.size() > 1 && path[1] == L':')
+			return path.substr(0, 2) + L'\\';
+
+		if (path.size() > 2 && IsPathSeparator(path[0]) && IsPathSeparator(path[1]))
+		{
+			const size_t serverEnd = path.find_first_of(L"\\/", 2);
+			if (serverEnd == std::wstring::npos)
+				return path + L'\\';
+
+			const size_t shareEnd = path.find_first_of(L"\\/", serverEnd + 1);
+			return shareEnd == std::wstring::npos ? path + L'\\' : path.substr(0, shareEnd + 1);
+		}
+
+		return path;
+	}
+
+	std::wstring MakeLongPath(const std::wstring& path)
+	{
+		if (path.size() < MAX_PATH - 12 || path.compare(0, 4, L"\\\\?\\") == 0)
 			return path;
 
-		size_t end = path.size();
-		while (end > 0 && IsPathSeparator(path[end - 1]))
-			--end;
+		if (path.compare(0, 2, L"\\\\") == 0)
+			return L"\\\\?\\UNC\\" + path.substr(2);
 
-		const size_t slash = path.find_last_of(L"\\/", end - 1);
-		if (slash == std::wstring::npos)
-			return path;
-
-		if (slash <= 2)
-			return path.substr(0, slash + 1);
-
-		return path.substr(0, slash);
+		return L"\\\\?\\" + path;
 	}
 
 	wchar_t NormalizeFilterChar(wchar_t ch)
@@ -123,74 +132,72 @@ namespace
 		return text;
 	}
 
-	std::wstring ExtractFilterFromKeyText(const std::wstring& rawText)
+	bool ContainsWildcardChars(const std::wstring& filter)
 	{
-		std::wstring text = NormalizeFilterText(rawText);
-		if (text.empty())
-			return text;
-
-		if (text.find(L'*') != std::wstring::npos || text.find(L'?') != std::wstring::npos)
-			return text;
-
-		if (text.size() == 1)
-			return text;
-
-		for (size_t index = text.size(); index > 0; --index)
-		{
-			const wchar_t ch = text[index - 1];
-			if ((iswalnum(ch) != 0) || ((iswprint(ch) != 0) && (iswspace(ch) == 0) && ch != L'+' && ch != L'-'))
-				return std::wstring(1, ch);
-		}
-
-		return text;
+		return filter.find(L'*') != std::wstring::npos || filter.find(L'?') != std::wstring::npos;
 	}
 
-	bool TryExtractFilterFromKeyDescriptor(const std::wstring& rawText, std::wstring& filter)
+	bool StripPrefix(std::wstring& text, const wchar_t* prefix)
 	{
-		std::wstring text = NormalizeFilterText(rawText);
-		if (text.empty())
+		const size_t length = wcslen(prefix);
+		if (text.size() <= length || text.compare(0, length, prefix) != 0)
 			return false;
 
+		text.erase(0, length);
+		return true;
+	}
+
+	// Parses FAR key names such as "AltA", "RAltShift." or "CtrlAlt*" into a one-character filter.
+	bool TryExtractFilterFromKeyDescriptor(const std::wstring& rawText, std::wstring& filter)
+	{
+		static const wchar_t* const Modifiers[] = {L"lalt", L"ralt", L"alt", L"lctrl", L"rctrl", L"ctrl", L"shift"};
+
+		std::wstring text = NormalizeFilterText(rawText);
 		bool hasModifier = false;
-		for (;;)
+		for (bool stripped = true; stripped;)
 		{
-			if (text.size() > 3 && text.compare(0, 3, L"alt") == 0)
+			stripped = false;
+			for (const wchar_t* modifier : Modifiers)
 			{
-				text.erase(0, 3);
-				hasModifier = true;
-				continue;
+				if (StripPrefix(text, modifier))
+				{
+					stripped = hasModifier = true;
+					break;
+				}
 			}
-
-			if (text.size() > 4 && text.compare(0, 4, L"ctrl") == 0)
-			{
-				text.erase(0, 4);
-				hasModifier = true;
-				continue;
-			}
-
-			if (text.size() > 5 && text.compare(0, 5, L"shift") == 0)
-			{
-				text.erase(0, 5);
-				hasModifier = true;
-				continue;
-			}
-
-			break;
 		}
 
 		if (!hasModifier || text.empty())
 			return false;
 
-		if (text.size() != 1 && text.find(L'*') == std::wstring::npos && text.find(L'?') == std::wstring::npos)
+		if (text.size() != 1 && !ContainsWildcardChars(text))
 			return false;
 
-		filter = ExtractFilterFromKeyText(text);
-		return !filter.empty();
+		filter = text;
+		return true;
 	}
 
-	bool ContainsWildcardChars(const std::wstring& filter)
+	std::wstring ParseStartupText(const std::wstring& rawText)
 	{
-		return filter.find(L'*') != std::wstring::npos || filter.find(L'?') != std::wstring::npos;
+		std::wstring filter;
+		if (TryExtractFilterFromKeyDescriptor(rawText, filter))
+			return filter;
+
+		return NormalizeFilterText(rawText);
+	}
+
+	std::wstring CodePointToString(unsigned long long codePoint)
+	{
+		if (codePoint <= 0xFFFF)
+			return std::wstring(1, static_cast<wchar_t>(codePoint));
+
+		codePoint -= 0x10000;
+		const wchar_t surrogates[] =
+		{
+			static_cast<wchar_t>(0xD800 + (codePoint >> 10)),
+			static_cast<wchar_t>(0xDC00 + (codePoint & 0x3FF)),
+		};
+		return std::wstring(surrogates, ARRAYSIZE(surrogates));
 	}
 
 	std::wstring BuildWildcardPattern(const std::wstring& filter)
@@ -304,7 +311,8 @@ namespace
 		return true;
 	}
 
-	bool GetPanelItem(HANDLE panel, size_t index, PanelItemSnapshot& panelItem)
+
+	bool GetPanelItemName(HANDLE panel, size_t index, std::wstring& fileName)
 	{
 		const intptr_t requiredSize = Info.PanelControl(panel, FCTL_GETPANELITEM, index, nullptr);
 		if (requiredSize <= 0)
@@ -322,14 +330,8 @@ namespace
 		if (!panelItemInfo.Item->FileName)
 			return false;
 
-		panelItem.FileName = panelItemInfo.Item->FileName;
-		panelItem.FileAttributes = panelItemInfo.Item->FileAttributes;
+		fileName = panelItemInfo.Item->FileName;
 		return true;
-	}
-
-	bool GetActivePanelItem(size_t index, PanelItemSnapshot& panelItem)
-	{
-		return GetPanelItem(PANEL_ACTIVE, index, panelItem);
 	}
 
 	std::wstring EscapeLuaString(const std::wstring& text)
@@ -370,7 +372,7 @@ namespace
 		case FMVT_STRING:
 			if (value.String && *value.String)
 			{
-				filter = ExtractFilterFromKeyText(value.String);
+				filter = ParseStartupText(value.String);
 				return !filter.empty();
 			}
 			return false;
@@ -378,7 +380,7 @@ namespace
 		case FMVT_INTEGER:
 			if (value.Integer >= 1 && value.Integer <= 0x10FFFF)
 			{
-				filter = ExtractFilterFromKeyText(std::wstring(1, static_cast<wchar_t>(value.Integer)));
+				filter = NormalizeFilterText(CodePointToString(static_cast<unsigned long long>(value.Integer)));
 				return !filter.empty();
 			}
 			return false;
@@ -386,7 +388,7 @@ namespace
 		case FMVT_DOUBLE:
 			if (value.Double >= 1.0 && value.Double <= 0x10FFFF)
 			{
-				filter = ExtractFilterFromKeyText(std::wstring(1, static_cast<wchar_t>(value.Double)));
+				filter = NormalizeFilterText(CodePointToString(static_cast<unsigned long long>(value.Double)));
 				return !filter.empty();
 			}
 			return false;
@@ -419,12 +421,7 @@ namespace
 		{
 			const OpenCommandLineInfo* commandInfo = reinterpret_cast<const OpenCommandLineInfo*>(openInfo->Data);
 			if (commandInfo->CommandLine)
-			{
-				std::wstring filter;
-				if (TryExtractFilterFromKeyDescriptor(commandInfo->CommandLine, filter))
-					return filter;
-				return NormalizeFilterText(commandInfo->CommandLine);
-			}
+				return ParseStartupText(commandInfo->CommandLine);
 		}
 
 		return L"";
@@ -459,9 +456,26 @@ namespace
 			ARRAYSIZE(buffer),
 			GetMsg(MPanelTitle),
 			state.FilterText.c_str(),
-			state.FilteredIndices.size(),
-			state.Entries.size());
+			static_cast<unsigned>(state.FilteredIndices.size()),
+			static_cast<unsigned>(state.Entries.size()));
 		state.PanelTitle = buffer;
+	}
+
+	HANDLE FindFirst(const std::wstring& searchPattern, WIN32_FIND_DATAW& findData)
+	{
+		// FindExInfoBasic and FIND_FIRST_EX_LARGE_FETCH need Windows 7; older systems reject them.
+		HANDLE findHandle = FindFirstFileExW(
+			searchPattern.c_str(),
+			FindExInfoBasic,
+			&findData,
+			FindExSearchNameMatch,
+			nullptr,
+			FIND_FIRST_EX_LARGE_FETCH);
+
+		if (findHandle == INVALID_HANDLE_VALUE && GetLastError() == ERROR_INVALID_PARAMETER)
+			findHandle = FindFirstFileW(searchPattern.c_str(), &findData);
+
+		return findHandle;
 	}
 
 	bool EnumerateDirectory(PanelState& state, const std::wstring& directory)
@@ -471,12 +485,13 @@ namespace
 		state.SourceDirectory = directory;
 
 		WIN32_FIND_DATAW findData{};
-		const std::wstring searchPattern = JoinPath(directory, L"*");
-		HANDLE findHandle = FindFirstFileW(searchPattern.c_str(), &findData);
+		const std::wstring searchPattern = MakeLongPath(JoinPath(directory, L"*"));
+		HANDLE findHandle = FindFirst(searchPattern, findData);
 		if (findHandle == INVALID_HANDLE_VALUE)
 		{
+			const DWORD error = GetLastError();
 			UpdatePanelTitle(state);
-			return true;
+			return error == ERROR_FILE_NOT_FOUND || error == ERROR_NO_MORE_FILES;
 		}
 
 		do
@@ -518,7 +533,7 @@ namespace
 		}
 
 		PanelInfo panelInfo{};
-		if (!GetActivePanelInfo(panelInfo) || panelInfo.PanelType != PTYPE_FILEPANEL)
+		if (!GetActivePanelInfo(panelInfo) || panelInfo.PanelType != PTYPE_FILEPANEL || (panelInfo.Flags & PFLAGS_PLUGIN) != 0)
 		{
 			ShowMessage({GetMsg(MPluginTitle), GetMsg(MWrongPanelType), GetMsg(MInstructions)});
 			return false;
@@ -530,16 +545,19 @@ namespace
 			return false;
 		}
 
-		state.OriginalDirectory = state.SourceDirectory;
 		state.ShowHidden = (panelInfo.Flags & PFLAGS_SHOWHIDDEN) != 0;
 		state.SortMode = panelInfo.SortMode;
 		state.SortOrder = (panelInfo.Flags & PFLAGS_REVERSESORTORDER) != 0 ? 1 : 0;
 
-		PanelItemSnapshot currentItem{};
-		if (GetActivePanelItem(panelInfo.CurrentItem, currentItem))
-			state.CurrentName = currentItem.FileName;
+		GetPanelItemName(PANEL_ACTIVE, panelInfo.CurrentItem, state.CurrentName);
 
-		return EnumerateDirectory(state, state.SourceDirectory);
+		if (!EnumerateDirectory(state, state.SourceDirectory))
+		{
+			ShowMessage({GetMsg(MPluginTitle), GetMsg(MCannotRead), state.SourceDirectory.c_str()});
+			return false;
+		}
+
+		return true;
 	}
 
 	size_t FindVisibleIndexByName(const PanelState& state, const std::wstring& name)
@@ -556,18 +574,18 @@ namespace
 		return 0;
 	}
 
-	std::wstring GetCurrentVisibleName(HANDLE panel, const PanelState& state)
+	std::wstring GetCurrentVisibleName(HANDLE panel)
 	{
 		PanelInfo panelInfo{};
 		panelInfo.StructSize = sizeof(panelInfo);
-		if (!Info.PanelControl(panel, FCTL_GETPANELINFO, 0, &panelInfo))
+		if (!Info.PanelControl(panel, FCTL_GETPANELINFO, 0, &panelInfo) || panelInfo.ItemsNumber == 0)
 			return L"";
 
-		PanelItemSnapshot panelItem{};
-		if (!GetPanelItem(panel, panelInfo.CurrentItem, panelItem))
+		std::wstring fileName;
+		if (!GetPanelItemName(panel, panelInfo.CurrentItem, fileName))
 			return L"";
 
-		return panelItem.FileName;
+		return fileName;
 	}
 
 	void RefreshPanel(PanelState& state, HANDLE panel, const std::wstring& preferredName)
@@ -575,7 +593,9 @@ namespace
 		RebuildFiltered(state);
 		UpdatePanelTitle(state);
 
-		Info.PanelControl(panel, FCTL_UPDATEPANEL, 0, reinterpret_cast<void*>(1));
+		// The entries are already up to date, so the GetFindDataW call triggered here must not rescan the disk.
+		state.SkipRescan = true;
+		Info.PanelControl(panel, FCTL_UPDATEPANEL, 1, nullptr);
 
 		PanelRedrawInfo redrawInfo{};
 		redrawInfo.StructSize = sizeof(redrawInfo);
@@ -593,48 +613,9 @@ namespace
 		Info.PanelControl(panel, FCTL_REDRAWPANEL, 0, &redrawInfo);
 	}
 
-	bool JumpToItemInActivePanel(const std::wstring& itemName)
-	{
-		PanelInfo panelInfo{};
-		if (!GetActivePanelInfo(panelInfo) || panelInfo.PanelType != PTYPE_FILEPANEL)
-			return false;
-
-		for (size_t index = 0; index < panelInfo.ItemsNumber; ++index)
-		{
-			PanelItemSnapshot panelItem{};
-			if (!GetActivePanelItem(index, panelItem))
-				continue;
-
-			if (panelItem.FileName == itemName)
-			{
-				PanelRedrawInfo redrawInfo{};
-				redrawInfo.StructSize = sizeof(redrawInfo);
-				redrawInfo.CurrentItem = index;
-				redrawInfo.TopPanelItem = index > 5 ? index - 5 : 0;
-				Info.PanelControl(PANEL_ACTIVE, FCTL_REDRAWPANEL, 0, &redrawInfo);
-				return true;
-			}
-		}
-
-		return false;
-	}
-
 	void CloseToDirectory(HANDLE panel, const std::wstring& directory)
 	{
 		Info.PanelControl(panel, FCTL_CLOSEPANEL, 0, const_cast<wchar_t*>(directory.c_str()));
-	}
-
-	void CloseToFile(HANDLE panel, const std::wstring& directory, const std::wstring& fileName)
-	{
-		CloseToDirectory(panel, directory);
-		JumpToItemInActivePanel(fileName);
-	}
-
-	void CloseToSelectedItem(HANDLE panel, const std::wstring& directory, const std::wstring& itemName)
-	{
-		CloseToDirectory(panel, directory);
-		if (!itemName.empty())
-			JumpToItemInActivePanel(itemName);
 	}
 
 	void CloseAndRunLuaMacro(HANDLE panel, const std::wstring& directory, const std::wstring& macroText)
@@ -648,17 +629,25 @@ namespace
 		Info.MacroControl(&MainGuid, MCTL_SENDSTRING, MSSC_POST, &macro);
 	}
 
-	void CloseToFileAndOpen(HANDLE panel, const std::wstring& directory, const std::wstring& fileName)
+	// FAR closes the plugin panel only after the current plugin call returns, so positioning
+	// the cursor in the real panel has to happen in a posted macro that runs afterwards.
+	void CloseAndPositionOn(HANDLE panel, const std::wstring& directory, const std::wstring& itemName, bool open)
 	{
-		const std::wstring macroText =
-			L"if Panel.SetPath(0, \"" + EscapeLuaString(directory) + L"\", \"" + EscapeLuaString(fileName) +
-			L"\") then Keys(\"Enter\") end";
+		if (itemName.empty())
+		{
+			CloseToDirectory(panel, directory);
+			return;
+		}
+
+		std::wstring macroText =
+			L"if Panel.SetPath(0, \"" + EscapeLuaString(directory) + L"\", \"" + EscapeLuaString(itemName) + L"\") then";
+		macroText += open ? L" Keys(\"Enter\") end" : L" end";
 		CloseAndRunLuaMacro(panel, directory, macroText);
 	}
 
-	const SourceEntry* FindEntryByName(const PanelState& state, const wchar_t* fileName)
+	const SourceEntry* FindEntryByName(const PanelState& state, const std::wstring& fileName)
 	{
-		if (!fileName || !*fileName)
+		if (fileName.empty())
 			return nullptr;
 
 		for (const SourceEntry& entry : state.Entries)
@@ -668,6 +657,42 @@ namespace
 		}
 
 		return nullptr;
+	}
+
+	HKL GetConsoleKeyboardLayout()
+	{
+		// The console window owns the input layout; FAR's own thread layout does not follow layout switches.
+		if (const HWND consoleWindow = GetConsoleWindow())
+		{
+			if (const DWORD threadId = GetWindowThreadProcessId(consoleWindow, nullptr))
+				return GetKeyboardLayout(threadId);
+		}
+
+		return GetKeyboardLayout(0);
+	}
+
+	bool TranslateKey(const KEY_EVENT_RECORD& key, const BYTE* keyboardState, wchar_t& ch)
+	{
+		// Bit 2: do not change the keyboard state (keeps pending dead keys intact, Windows 10 1607+).
+		const UINT ToUnicodeNoStateChange = 0x4;
+
+		wchar_t translated[8]{};
+		const int translatedCount = ToUnicodeEx(
+			key.wVirtualKeyCode,
+			key.wVirtualScanCode,
+			keyboardState,
+			translated,
+			ARRAYSIZE(translated),
+			ToUnicodeNoStateChange,
+			GetConsoleKeyboardLayout());
+
+		if (translatedCount > 0 && translated[0] >= VK_SPACE && translated[0] != 0x7F)
+		{
+			ch = translated[0];
+			return true;
+		}
+
+		return false;
 	}
 
 	bool ExtractInputChar(const KEY_EVENT_RECORD& key, wchar_t& ch)
@@ -682,6 +707,7 @@ namespace
 			return true;
 		}
 
+		// Alt+- (or AltGr+- on layouts such as Hungarian) types '*'.
 		if (altPressed && key.wVirtualKeyCode == VK_OEM_MINUS)
 		{
 			ch = L'*';
@@ -697,44 +723,17 @@ namespace
 			if (key.dwControlKeyState & SHIFT_PRESSED)
 				keyboardState[VK_SHIFT] = 0x80;
 
-			wchar_t translated[8]{};
-			const int translatedCount = ToUnicode(
-				key.wVirtualKeyCode,
-				key.wVirtualScanCode,
-				keyboardState,
-				translated,
-				ARRAYSIZE(translated),
-				0);
-
-			if (translatedCount > 0 && translated[0] >= VK_SPACE)
-			{
-				ch = translated[0];
+			if (TranslateKey(key, keyboardState, ch))
 				return true;
-			}
 
 			if (altPressed)
 			{
-				ZeroMemory(keyboardState, sizeof(keyboardState));
-				if (key.dwControlKeyState & SHIFT_PRESSED)
-					keyboardState[VK_SHIFT] = 0x80;
-				if (key.dwControlKeyState & (LEFT_ALT_PRESSED | RIGHT_ALT_PRESSED))
-					keyboardState[VK_MENU] = 0x80;
-				if (key.dwControlKeyState & (LEFT_CTRL_PRESSED | RIGHT_CTRL_PRESSED))
+				keyboardState[VK_MENU] = 0x80;
+				if (ctrlPressed)
 					keyboardState[VK_CONTROL] = 0x80;
 
-				const int altTranslatedCount = ToUnicode(
-					key.wVirtualKeyCode,
-					key.wVirtualScanCode,
-					keyboardState,
-					translated,
-					ARRAYSIZE(translated),
-					0);
-
-				if (altTranslatedCount > 0 && translated[0] >= VK_SPACE)
-				{
-					ch = translated[0];
+				if (TranslateKey(key, keyboardState, ch))
 					return true;
-				}
 			}
 
 			return false;
@@ -743,7 +742,7 @@ namespace
 		if (ctrlPressed && !altGrPressed)
 			return false;
 
-		if (key.uChar.UnicodeChar < VK_SPACE)
+		if (key.uChar.UnicodeChar < VK_SPACE || key.uChar.UnicodeChar == 0x7F)
 			return false;
 
 		ch = key.uChar.UnicodeChar;
@@ -792,14 +791,19 @@ extern "C" HANDLE WINAPI OpenW(const OpenInfo* openInfo)
 		return nullptr;
 	}
 
-	if (!state->FilterText.empty() && !HasAnyMatchesForFilter(*state, state->FilterText))
+	if (state->FilteredIndices.empty())
 	{
+		if (state->FilterText.empty())
+			ShowMessage({GetMsg(MPluginTitle), GetMsg(MNoEntries)});
+		else
+			MessageBeep(MB_OK);
+
 		delete state;
 		return nullptr;
 	}
 
-	RebuildFiltered(*state);
-	UpdatePanelTitle(*state);
+	// EnumerateDirectory has just filled the entries; the first GetFindDataW call can use them as is.
+	state->SkipRescan = true;
 	return state;
 }
 
@@ -809,14 +813,19 @@ extern "C" intptr_t WINAPI GetFindDataW(GetFindDataInfo* findDataInfo)
 	if (!state)
 		return FALSE;
 
-	findDataInfo->ItemsNumber = state->FilteredIndices.size();
-	if (state->FilteredIndices.empty())
-	{
-		findDataInfo->PanelItem = nullptr;
-		return TRUE;
-	}
+	// FAR asks for fresh data after its own file operations (F5, F6, F8, ...), so rescan unless
+	// the request came from a plain filter change.
+	if (state->SkipRescan)
+		state->SkipRescan = false;
+	else if ((findDataInfo->OpMode & OPM_FIND) == 0)
+		EnumerateDirectory(*state, state->SourceDirectory);
 
-	PluginPanelItem* items = static_cast<PluginPanelItem*>(calloc(findDataInfo->ItemsNumber, sizeof(PluginPanelItem)));
+	findDataInfo->PanelItem = nullptr;
+	findDataInfo->ItemsNumber = 0;
+	if (state->FilteredIndices.empty())
+		return TRUE;
+
+	PluginPanelItem* items = static_cast<PluginPanelItem*>(calloc(state->FilteredIndices.size(), sizeof(PluginPanelItem)));
 	if (!items)
 		return FALSE;
 
@@ -830,6 +839,7 @@ extern "C" intptr_t WINAPI GetFindDataW(GetFindDataInfo* findDataInfo)
 	}
 
 	findDataInfo->PanelItem = items;
+	findDataInfo->ItemsNumber = state->FilteredIndices.size();
 	return TRUE;
 }
 
@@ -842,6 +852,9 @@ extern "C" void WINAPI GetOpenPanelInfoW(OpenPanelInfo* openPanelInfo)
 {
 	PanelState* state = static_cast<PanelState*>(openPanelInfo->hPanel);
 	openPanelInfo->StructSize = sizeof(*openPanelInfo);
+	if (!state)
+		return;
+
 	openPanelInfo->Flags = OPIF_REALNAMES;
 	openPanelInfo->CurDir = state->SourceDirectory.c_str();
 	openPanelInfo->Format = L"PaneFilter";
@@ -860,78 +873,78 @@ extern "C" intptr_t WINAPI ProcessPanelInputW(const ProcessPanelInputInfo* proce
 	if (!state || processInfo->Rec.EventType != KEY_EVENT || !processInfo->Rec.Event.KeyEvent.bKeyDown)
 		return FALSE;
 
+	HANDLE panel = processInfo->hPanel;
 	const KEY_EVENT_RECORD& key = processInfo->Rec.Event.KeyEvent;
-	const std::wstring selectedName = GetCurrentVisibleName(processInfo->hPanel, *state);
 	const bool ctrlPressed = (key.dwControlKeyState & (LEFT_CTRL_PRESSED | RIGHT_CTRL_PRESSED)) != 0;
+	const bool altPressed = (key.dwControlKeyState & (LEFT_ALT_PRESSED | RIGHT_ALT_PRESSED)) != 0;
+	const bool shiftPressed = (key.dwControlKeyState & SHIFT_PRESSED) != 0;
+	const bool noModifiers = !ctrlPressed && !altPressed && !shiftPressed;
 
-	switch (key.wVirtualKeyCode)
+	if (noModifiers)
 	{
-	case VK_ESCAPE:
-		CloseToDirectory(processInfo->hPanel, state->OriginalDirectory);
-		return TRUE;
-
-	case VK_BACK:
-		if (!state->FilterText.empty())
+		switch (key.wVirtualKeyCode)
 		{
-			state->FilterText.pop_back();
+		case VK_ESCAPE:
+			CloseAndPositionOn(panel, state->SourceDirectory, state->CurrentName, false);
+			return TRUE;
+
+		case VK_BACK:
+			if (!state->FilterText.empty())
+				state->FilterText.pop_back();
+
 			if (state->FilterText.empty())
-				CloseToDirectory(processInfo->hPanel, state->OriginalDirectory);
+				CloseAndPositionOn(panel, state->SourceDirectory, state->CurrentName, false);
 			else
-				RefreshPanel(*state, processInfo->hPanel, L"");
-		}
-		else
-			CloseToDirectory(processInfo->hPanel, state->OriginalDirectory);
-		return TRUE;
+				RefreshPanel(*state, panel, GetCurrentVisibleName(panel));
+			return TRUE;
 
-	case VK_DELETE:
-		if (!state->FilterText.empty())
-			CloseToSelectedItem(processInfo->hPanel, state->OriginalDirectory, selectedName);
-		else
-			CloseToDirectory(processInfo->hPanel, state->OriginalDirectory);
-		return TRUE;
+		case VK_DELETE:
+			CloseAndPositionOn(
+				panel,
+				state->SourceDirectory,
+				state->FilterText.empty() ? state->CurrentName : GetCurrentVisibleName(panel),
+				false);
+			return TRUE;
 
-	default:
-		if (ctrlPressed && (key.wVirtualKeyCode == 'R'))
+		case VK_RETURN:
 		{
-			EnumerateDirectory(*state, state->SourceDirectory);
-			RefreshPanel(*state, processInfo->hPanel, selectedName);
+			const SourceEntry* entry = FindEntryByName(*state, GetCurrentVisibleName(panel));
+			if (!entry)
+				return FALSE;
+
+			if (entry->IsDirectory)
+				CloseToDirectory(panel, entry->FullPath);
+			else
+				CloseAndPositionOn(panel, state->SourceDirectory, entry->Name, true);
 			return TRUE;
 		}
 
-		wchar_t inputChar = 0;
-		if (ExtractInputChar(key, inputChar))
-		{
-			const wchar_t normalizedChar = NormalizeFilterChar(inputChar);
-			const std::wstring candidateFilter = state->FilterText + normalizedChar;
-			if (HasAnyMatchesForFilter(*state, candidateFilter))
-			{
-				state->FilterText = candidateFilter;
-				RefreshPanel(*state, processInfo->hPanel, L"");
-			}
-			return TRUE;
+		default:
+			break;
 		}
-		break;
+	}
+
+	if (ctrlPressed && !altPressed && !shiftPressed && key.wVirtualKeyCode == 'R')
+	{
+		const std::wstring selectedName = GetCurrentVisibleName(panel);
+		EnumerateDirectory(*state, state->SourceDirectory);
+		RefreshPanel(*state, panel, selectedName);
+		return TRUE;
+	}
+
+	wchar_t inputChar = 0;
+	if (ExtractInputChar(key, inputChar))
+	{
+		const std::wstring candidateFilter = state->FilterText + NormalizeFilterChar(inputChar);
+		if (HasAnyMatchesForFilter(*state, candidateFilter))
+		{
+			state->FilterText = candidateFilter;
+			RefreshPanel(*state, panel, GetCurrentVisibleName(panel));
+		}
+		return TRUE;
 	}
 
 	return FALSE;
-}
-
-extern "C" intptr_t WINAPI ProcessHostFileW(const ProcessHostFileInfo* processHostFileInfo)
-{
-	PanelState* state = static_cast<PanelState*>(processHostFileInfo->hPanel);
-	if (!state || !processHostFileInfo->PanelItem || processHostFileInfo->ItemsNumber == 0)
-		return FALSE;
-
-	const SourceEntry* entry = FindEntryByName(*state, processHostFileInfo->PanelItem[0].FileName);
-	if (!entry)
-		return FALSE;
-
-	if (entry->IsDirectory)
-		CloseToDirectory(processHostFileInfo->hPanel, entry->FullPath);
-	else
-		CloseToFileAndOpen(processHostFileInfo->hPanel, state->SourceDirectory, entry->Name);
-
-	return TRUE;
 }
 
 extern "C" intptr_t WINAPI SetDirectoryW(const SetDirectoryInfo* setDirectoryInfo)
@@ -940,13 +953,20 @@ extern "C" intptr_t WINAPI SetDirectoryW(const SetDirectoryInfo* setDirectoryInf
 	if (!state || !setDirectoryInfo->Dir || setDirectoryInfo->Dir[0] == 0)
 		return FALSE;
 
+	// Find File and other silent traversals must not close the panel under FAR's feet.
+	if ((setDirectoryInfo->OpMode & (OPM_FIND | OPM_SILENT)) != 0)
+		return FALSE;
+
 	std::wstring target = setDirectoryInfo->Dir;
 	if (target == L"..")
 	{
-		CloseToDirectory(setDirectoryInfo->hPanel, state->OriginalDirectory);
+		CloseAndPositionOn(setDirectoryInfo->hPanel, state->SourceDirectory, state->CurrentName, false);
 		return TRUE;
 	}
-	else if (target.find(L':') == std::wstring::npos && !(target.size() > 1 && target[0] == L'\\' && target[1] == L'\\'))
+
+	if (IsPathSeparator(target[0]) && !IsAbsolutePath(target))
+		target = GetRootPath(state->SourceDirectory) + target.substr(1);
+	else if (!IsAbsolutePath(target))
 		target = JoinPath(state->SourceDirectory, target);
 
 	CloseToDirectory(setDirectoryInfo->hPanel, target);

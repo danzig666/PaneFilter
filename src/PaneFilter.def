@@ -7,6 +7,5 @@ EXPORTS
   FreeFindDataW
   GetOpenPanelInfoW
   ProcessPanelInputW
-  ProcessHostFileW
   SetDirectoryW
   ClosePanelW

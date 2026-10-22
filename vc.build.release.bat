@@ -40,7 +40,7 @@ if errorlevel 1 exit /b 1
 
 if not exist "%BUILD_DIR%" mkdir "%BUILD_DIR%"
 
-"%CMAKE_EXE%" -S "%ROOT%" -B "%BUILD_DIR%" -DCMAKE_INSTALL_PREFIX="%INSTALL_DIR%" -DCMAKE_BUILD_TYPE=Release -G "CodeBlocks - NMake Makefiles"
+"%CMAKE_EXE%" -S "%ROOT%" -B "%BUILD_DIR%" -DCMAKE_INSTALL_PREFIX="%INSTALL_DIR%" -DCMAKE_BUILD_TYPE=Release -G "NMake Makefiles"
 if errorlevel 1 exit /b 1
 
 "%CMAKE_EXE%" --build "%BUILD_DIR%" --target install
