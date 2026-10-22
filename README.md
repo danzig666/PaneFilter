@@ -35,3 +35,10 @@ artifacts.
 
 Locally, run `vc.build.release.bat` from this directory. It builds x86 and x64
 variants and places the results in `bin\x86` and `bin\x64`.
+
+Releases
+--------
+
+Pushing a tag named `vX.Y.Z` builds both variants and publishes a GitHub
+release with ready-to-install zips (plugin files, macro, README) and separate
+PDB zips for debugging. Keep `src/version.hpp` in sync with the tag.

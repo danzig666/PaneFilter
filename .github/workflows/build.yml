@@ -2,6 +2,8 @@ name: Build
 
 on:
   push:
+    branches: ['**']
+    tags: ['v*']
   pull_request:
   workflow_dispatch:
 
@@ -33,3 +35,39 @@ jobs:
         with:
           name: PaneFilter-${{ matrix.arch }}
           path: bin/${{ matrix.arch }}
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Package
+        run: |
+          for arch in x86 x64; do
+            dir="package-$arch/PaneFilter"
+            mkdir -p "$dir"
+            cp artifacts/PaneFilter-$arch/PaneFilter.dll \
+               artifacts/PaneFilter-$arch/PaneFilter_Eng.lng \
+               artifacts/PaneFilter-$arch/PaneFilter_Eng.hlf \
+               artifacts/PaneFilter-$arch/File_ID.diz \
+               "PaneFilter macro.lua" README.md LICENSE "$dir/"
+            (cd "package-$arch" && zip -r "../PaneFilter-${GITHUB_REF_NAME}-$arch.zip" PaneFilter)
+            (cd artifacts/PaneFilter-$arch && zip "../../PaneFilter-${GITHUB_REF_NAME}-$arch-pdb.zip" PaneFilter.pdb)
+          done
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            PaneFilter-${{ github.ref_name }}-x86.zip
+            PaneFilter-${{ github.ref_name }}-x64.zip
+            PaneFilter-${{ github.ref_name }}-x86-pdb.zip
+            PaneFilter-${{ github.ref_name }}-x64-pdb.zip
