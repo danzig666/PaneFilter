@@ -19,3 +19,4 @@ dispatch the `build.yml` workflow on `main` with the `tag` input (e.g. `v1.2.0`)
 
 When a change is done and CI is green, always merge it to `main` and publish a release
 (bump `src/version.hpp`, then dispatch the release as described above) without asking first.
+Releases must not include PDB files.
