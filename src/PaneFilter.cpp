@@ -7,8 +7,11 @@
 #include <vector>
 
 #include "plugin.hpp"
-#include "guid.hpp"
+#include "FarApi.hpp"
 #include "FarLang.h"
+#include "Guids.hpp"
+#include "Matching.hpp"
+#include "Updater.hpp"
 #include "version.hpp"
 
 namespace
@@ -16,6 +19,7 @@ namespace
 	struct SourceEntry
 	{
 		std::wstring Name;
+		std::wstring MatchName;
 		std::wstring FullPath;
 		unsigned long long FileSize;
 		FILETIME LastWriteTime;
@@ -37,9 +41,6 @@ namespace
 		intptr_t SortOrder;
 	};
 
-	PluginStartupInfo Info{};
-	FarStandardFunctions FSF{};
-
 	const wchar_t* const PanelColumnTitles[] = {nullptr, nullptr, nullptr};
 	const PanelMode PanelModes[] =
 	{
@@ -48,12 +49,12 @@ namespace
 
 	const wchar_t* GetMsg(int id)
 	{
-		return Info.GetMsg(&MainGuid, id);
+		return PsInfo.GetMsg(&MainGuid, id);
 	}
 
 	void ShowMessage(const std::vector<const wchar_t*>& lines)
 	{
-		Info.Message(&MainGuid, &MessageGuid, FMSG_LEFTALIGN | FMSG_WARNING | FMSG_MB_OK, nullptr, lines.data(), lines.size(), 0);
+		PsInfo.Message(&MainGuid, &MessageGuid, FMSG_LEFTALIGN | FMSG_WARNING | FMSG_MB_OK, nullptr, lines.data(), lines.size(), 0);
 	}
 
 	bool IsPathSeparator(wchar_t ch)
@@ -132,11 +133,6 @@ namespace
 		return text;
 	}
 
-	bool ContainsWildcardChars(const std::wstring& filter)
-	{
-		return filter.find(L'*') != std::wstring::npos || filter.find(L'?') != std::wstring::npos;
-	}
-
 	bool StripPrefix(std::wstring& text, const wchar_t* prefix)
 	{
 		const size_t length = wcslen(prefix);
@@ -170,7 +166,7 @@ namespace
 		if (!hasModifier || text.empty())
 			return false;
 
-		if (text.size() != 1 && !ContainsWildcardChars(text))
+		if (text.size() != 1 && !match::ContainsWildcardChars(text))
 			return false;
 
 		filter = text;
@@ -200,103 +196,21 @@ namespace
 		return std::wstring(surrogates, ARRAYSIZE(surrogates));
 	}
 
-	std::wstring BuildWildcardPattern(const std::wstring& filter)
-	{
-		if (filter.empty())
-			return filter;
-
-		std::wstring pattern = filter;
-		if (pattern.front() != L'*')
-			pattern.insert(pattern.begin(), L'*');
-		if (pattern.back() != L'*')
-			pattern.push_back(L'*');
-		return pattern;
-	}
-
-	const wchar_t* StrIContains(const wchar_t* text, const std::wstring& needle)
-	{
-		if (!text)
-			return nullptr;
-
-		if (needle.empty())
-			return text;
-
-		const size_t needleLength = needle.size();
-		for (const wchar_t* cursor = text; *cursor; ++cursor)
-		{
-			if (FSF.LStrnicmp(cursor, needle.c_str(), needleLength) == 0)
-				return cursor;
-		}
-
-		return nullptr;
-	}
-
-	bool WildcardMatchI(const wchar_t* text, const wchar_t* pattern)
-	{
-		const wchar_t* star = nullptr;
-		const wchar_t* retryText = nullptr;
-
-		while (*text)
-		{
-			if (*pattern == L'*')
-			{
-				star = pattern++;
-				retryText = text;
-				continue;
-			}
-
-			if (*pattern == L'?' || NormalizeFilterChar(*pattern) == NormalizeFilterChar(*text))
-			{
-				++pattern;
-				++text;
-				continue;
-			}
-
-			if (star)
-			{
-				pattern = star + 1;
-				text = ++retryText;
-				continue;
-			}
-
-			return false;
-		}
-
-		while (*pattern == L'*')
-			++pattern;
-
-		return *pattern == 0;
-	}
-
-	bool MatchesFilter(const std::wstring& name, const std::wstring& filter)
-	{
-		if (filter.empty())
-			return true;
-
-		if (ContainsWildcardChars(filter))
-		{
-			const std::wstring pattern = BuildWildcardPattern(filter);
-			return WildcardMatchI(name.c_str(), pattern.c_str());
-		}
-
-		return StrIContains(name.c_str(), filter) != nullptr;
-	}
-
 	bool HasPanels()
 	{
-		return Info.PanelControl(PANEL_ACTIVE, FCTL_CHECKPANELSEXIST, 0, nullptr) != FALSE;
+		return PsInfo.PanelControl(PANEL_ACTIVE, FCTL_CHECKPANELSEXIST, 0, nullptr) != FALSE;
 	}
 
 	bool GetActivePanelInfo(PanelInfo& panelInfo)
 	{
 		panelInfo = {};
 		panelInfo.StructSize = sizeof(panelInfo);
-		return Info.PanelControl(PANEL_ACTIVE, FCTL_GETPANELINFO, 0, &panelInfo) != FALSE;
+		return PsInfo.PanelControl(PANEL_ACTIVE, FCTL_GETPANELINFO, 0, &panelInfo) != FALSE;
 	}
 
 	bool GetPanelDirectory(HANDLE panel, std::wstring& directory)
 	{
-		const intptr_t requiredSize = Info.PanelControl(panel, FCTL_GETPANELDIRECTORY, 0, nullptr);
+		const intptr_t requiredSize = PsInfo.PanelControl(panel, FCTL_GETPANELDIRECTORY, 0, nullptr);
 		if (requiredSize <= 0)
 			return false;
 
@@ -304,7 +218,7 @@ namespace
 		FarPanelDirectory* panelDirectory = reinterpret_cast<FarPanelDirectory*>(buffer.data());
 		panelDirectory->StructSize = sizeof(FarPanelDirectory);
 
-		if (!Info.PanelControl(panel, FCTL_GETPANELDIRECTORY, requiredSize, panelDirectory))
+		if (!PsInfo.PanelControl(panel, FCTL_GETPANELDIRECTORY, requiredSize, panelDirectory))
 			return false;
 
 		directory = panelDirectory->Name ? panelDirectory->Name : L"";
@@ -314,7 +228,7 @@ namespace
 
 	bool GetPanelItemName(HANDLE panel, size_t index, std::wstring& fileName)
 	{
-		const intptr_t requiredSize = Info.PanelControl(panel, FCTL_GETPANELITEM, index, nullptr);
+		const intptr_t requiredSize = PsInfo.PanelControl(panel, FCTL_GETPANELITEM, index, nullptr);
 		if (requiredSize <= 0)
 			return false;
 
@@ -324,7 +238,7 @@ namespace
 		panelItemInfo.Size = static_cast<size_t>(requiredSize);
 		panelItemInfo.Item = reinterpret_cast<PluginPanelItem*>(buffer.data());
 
-		if (!Info.PanelControl(panel, FCTL_GETPANELITEM, index, &panelItemInfo))
+		if (!PsInfo.PanelControl(panel, FCTL_GETPANELITEM, index, &panelItemInfo))
 			return false;
 
 		if (!panelItemInfo.Item->FileName)
@@ -429,19 +343,21 @@ namespace
 
 	void RebuildFiltered(PanelState& state)
 	{
+		const std::wstring foldedFilter = match::FoldForMatch(state.FilterText);
 		state.FilteredIndices.clear();
 		for (size_t index = 0; index < state.Entries.size(); ++index)
 		{
-			if (MatchesFilter(state.Entries[index].Name, state.FilterText))
+			if (match::MatchesFolded(state.Entries[index].MatchName, foldedFilter))
 				state.FilteredIndices.push_back(index);
 		}
 	}
 
 	bool HasAnyMatchesForFilter(const PanelState& state, const std::wstring& filterText)
 	{
+		const std::wstring foldedFilter = match::FoldForMatch(filterText);
 		for (const SourceEntry& entry : state.Entries)
 		{
-			if (MatchesFilter(entry.Name, filterText))
+			if (match::MatchesFolded(entry.MatchName, foldedFilter))
 				return true;
 		}
 
@@ -508,6 +424,7 @@ namespace
 
 			SourceEntry entry{};
 			entry.Name = fileName;
+			entry.MatchName = match::FoldForMatch(entry.Name);
 			entry.FullPath = JoinPath(directory, entry.Name);
 			entry.FileSize = (static_cast<unsigned long long>(findData.nFileSizeHigh) << 32) | findData.nFileSizeLow;
 			entry.LastWriteTime = findData.ftLastWriteTime;
@@ -560,25 +477,11 @@ namespace
 		return true;
 	}
 
-	size_t FindVisibleIndexByName(const PanelState& state, const std::wstring& name)
-	{
-		if (name.empty())
-			return 0;
-
-		for (size_t visibleIndex = 0; visibleIndex < state.FilteredIndices.size(); ++visibleIndex)
-		{
-			if (state.Entries[state.FilteredIndices[visibleIndex]].Name == name)
-				return visibleIndex;
-		}
-
-		return 0;
-	}
-
 	std::wstring GetCurrentVisibleName(HANDLE panel)
 	{
 		PanelInfo panelInfo{};
 		panelInfo.StructSize = sizeof(panelInfo);
-		if (!Info.PanelControl(panel, FCTL_GETPANELINFO, 0, &panelInfo) || panelInfo.ItemsNumber == 0)
+		if (!PsInfo.PanelControl(panel, FCTL_GETPANELINFO, 0, &panelInfo) || panelInfo.ItemsNumber == 0)
 			return L"";
 
 		std::wstring fileName;
@@ -588,6 +491,26 @@ namespace
 		return fileName;
 	}
 
+	// Position of an item in the panel as FAR shows it, i.e. in the panel's sort order.
+	size_t FindPanelIndexByName(HANDLE panel, const std::wstring& name)
+	{
+		PanelInfo panelInfo{};
+		panelInfo.StructSize = sizeof(panelInfo);
+		if (name.empty() || !PsInfo.PanelControl(panel, FCTL_GETPANELINFO, 0, &panelInfo))
+			return 0;
+
+		for (size_t index = 0; index < panelInfo.ItemsNumber; ++index)
+		{
+			std::wstring fileName;
+			if (GetPanelItemName(panel, index, fileName) && fileName == name)
+				return index;
+		}
+
+		return 0;
+	}
+
+	// Reloads the panel. The cursor goes to preferredName if given, otherwise to the first item
+	// in the panel's sort order (for example the newest file when sorted by time).
 	void RefreshPanel(PanelState& state, HANDLE panel, const std::wstring& preferredName)
 	{
 		RebuildFiltered(state);
@@ -595,27 +518,20 @@ namespace
 
 		// The entries are already up to date, so the GetFindDataW call triggered here must not rescan the disk.
 		state.SkipRescan = true;
-		Info.PanelControl(panel, FCTL_UPDATEPANEL, 1, nullptr);
+		PsInfo.PanelControl(panel, FCTL_UPDATEPANEL, 1, nullptr);
 
+		// FAR sorts the items itself, so the index has to be looked up in the updated panel.
 		PanelRedrawInfo redrawInfo{};
 		redrawInfo.StructSize = sizeof(redrawInfo);
-		if (!state.FilteredIndices.empty())
-		{
-			redrawInfo.CurrentItem = FindVisibleIndexByName(state, preferredName);
-			redrawInfo.TopPanelItem = redrawInfo.CurrentItem > 5 ? redrawInfo.CurrentItem - 5 : 0;
-		}
-		else
-		{
-			redrawInfo.CurrentItem = 0;
-			redrawInfo.TopPanelItem = 0;
-		}
+		redrawInfo.CurrentItem = FindPanelIndexByName(panel, preferredName);
+		redrawInfo.TopPanelItem = redrawInfo.CurrentItem > 5 ? redrawInfo.CurrentItem - 5 : 0;
 
-		Info.PanelControl(panel, FCTL_REDRAWPANEL, 0, &redrawInfo);
+		PsInfo.PanelControl(panel, FCTL_REDRAWPANEL, 0, &redrawInfo);
 	}
 
 	void CloseToDirectory(HANDLE panel, const std::wstring& directory)
 	{
-		Info.PanelControl(panel, FCTL_CLOSEPANEL, 0, const_cast<wchar_t*>(directory.c_str()));
+		PsInfo.PanelControl(panel, FCTL_CLOSEPANEL, 0, const_cast<wchar_t*>(directory.c_str()));
 	}
 
 	void CloseAndRunLuaMacro(HANDLE panel, const std::wstring& directory, const std::wstring& macroText)
@@ -626,7 +542,7 @@ namespace
 		macro.StructSize = sizeof(macro);
 		macro.Flags = KMFLAGS_LUA;
 		macro.SequenceText = macroText.c_str();
-		Info.MacroControl(&MainGuid, MCTL_SENDSTRING, MSSC_POST, &macro);
+		PsInfo.MacroControl(&MainGuid, MCTL_SENDSTRING, MSSC_POST, &macro);
 	}
 
 	// FAR closes the plugin panel only after the current plugin call returns, so positioning
@@ -763,25 +679,47 @@ extern "C" void WINAPI GetGlobalInfoW(GlobalInfo* globalInfo)
 
 extern "C" void WINAPI SetStartupInfoW(const PluginStartupInfo* startupInfo)
 {
-	Info = *startupInfo;
+	PsInfo = *startupInfo;
 	FSF = *startupInfo->FSF;
-	Info.FSF = &FSF;
+	PsInfo.FSF = &FSF;
+	try
+	{
+		updater::CleanupOldFiles();  // leftovers of earlier updates that no FAR uses any more
+	}
+	catch (...)
+	{
+	}
 }
 
 extern "C" void WINAPI GetPluginInfoW(PluginInfo* pluginInfo)
 {
-	static const wchar_t* menuStrings[1];
+	static const wchar_t* menuStrings[2];
+	static const GUID menuGuids[] = {PluginMenuGuid, UpdateMenuGuid};
 	menuStrings[0] = GetMsg(MPluginTitle);
+	menuStrings[1] = GetMsg(MCheckForUpdates);
 
 	pluginInfo->StructSize = sizeof(*pluginInfo);
 	pluginInfo->PluginMenu.Strings = menuStrings;
 	pluginInfo->PluginMenu.Count = ARRAYSIZE(menuStrings);
-	pluginInfo->PluginMenu.Guids = &PluginMenuGuid;
+	pluginInfo->PluginMenu.Guids = menuGuids;
 	pluginInfo->CommandPrefix = L"panefilter";
 }
 
 extern "C" HANDLE WINAPI OpenW(const OpenInfo* openInfo)
 {
+	if (openInfo && openInfo->OpenFrom == OPEN_PLUGINSMENU && openInfo->Guid && *openInfo->Guid == UpdateMenuGuid)
+	{
+		try
+		{
+			updater::CheckForUpdates();
+		}
+		catch (...)
+		{
+			fui::ShowError(L"Check for updates", L"The update check failed unexpectedly.");
+		}
+		return nullptr;
+	}
+
 	PanelState* state = new PanelState();
 	state->FilterText = GetStartupFilter(openInfo);
 
@@ -895,7 +833,7 @@ extern "C" intptr_t WINAPI ProcessPanelInputW(const ProcessPanelInputInfo* proce
 			if (state->FilterText.empty())
 				CloseAndPositionOn(panel, state->SourceDirectory, state->CurrentName, false);
 			else
-				RefreshPanel(*state, panel, GetCurrentVisibleName(panel));
+				RefreshPanel(*state, panel, L"");
 			return TRUE;
 
 		case VK_DELETE:
@@ -939,7 +877,7 @@ extern "C" intptr_t WINAPI ProcessPanelInputW(const ProcessPanelInputInfo* proce
 		if (HasAnyMatchesForFilter(*state, candidateFilter))
 		{
 			state->FilterText = candidateFilter;
-			RefreshPanel(*state, panel, GetCurrentVisibleName(panel));
+			RefreshPanel(*state, panel, L"");
 		}
 		return TRUE;
 	}

@@ -31,10 +31,15 @@ jobs:
           arch: ${{ matrix.msvc }}
 
       - name: Configure
-        run: cmake -S . -B build -G "NMake Makefiles" -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="${{ github.workspace }}/bin/${{ matrix.arch }}"
+        run: cmake -S . -B build -G "NMake Makefiles" -DCMAKE_BUILD_TYPE=Release -DPANEFILTER_BUILD_TESTS=ON -DCMAKE_INSTALL_PREFIX="${{ github.workspace }}/bin/${{ matrix.arch }}"
 
       - name: Build
         run: cmake --build build --target install
+
+      - name: Build and run unit tests
+        run: |
+          cmake --build build --target match_tests
+          build\match_tests.exe
 
       - uses: actions/upload-artifact@v4
         with:
@@ -58,6 +63,7 @@ jobs:
 
       - name: Package
         run: |
+          mkdir -p update
           for arch in x86 x64; do
             dir="package-$arch/PaneFilter"
             mkdir -p "$dir"
@@ -68,7 +74,11 @@ jobs:
                "PaneFilter macro.lua" README.md LICENSE "$dir/"
             (cd "package-$arch" && zip -r "../PaneFilter-${TAG}-$arch.zip" PaneFilter)
             (cd artifacts/PaneFilter-$arch && zip "../../PaneFilter-${TAG}-$arch-pdb.zip" PaneFilter.pdb)
+            # The bare files and their checksums are what "Check for updates" downloads.
+            cp artifacts/PaneFilter-$arch/PaneFilter.dll "update/PaneFilter.$arch.dll"
           done
+          cp artifacts/PaneFilter-x64/PaneFilter_Eng.lng artifacts/PaneFilter-x64/PaneFilter_Eng.hlf update/
+          (cd update && for file in *; do sha256sum "$file" > "$file.sha256"; done)
 
       - uses: softprops/action-gh-release@v2
         with:
@@ -80,3 +90,4 @@ jobs:
             PaneFilter-${{ env.TAG }}-x64.zip
             PaneFilter-${{ env.TAG }}-x86-pdb.zip
             PaneFilter-${{ env.TAG }}-x64-pdb.zip
+            update/*

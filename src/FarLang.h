@@ -9,4 +9,5 @@ enum
 	MInstructions,
 	MPanelTitle,
 	MCannotRead,
+	MCheckForUpdates,
 };

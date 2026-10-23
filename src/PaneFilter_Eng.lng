@@ -7,3 +7,4 @@
 "Use PaneFilter from a normal filesystem panel."
 "PaneFilter [%s]  %u/%u"
 "Cannot read the current directory:"
+"PaneFilter: Check for updates"
