@@ -27,6 +27,10 @@ Features
 - After each change of the filter the cursor goes to the first item in the
   panel's sort order, e.g. the newest file when the panel is sorted by time.
 - Shows file name, size, and modified date/time in the panel columns.
+- Selection is kept: files selected in the real panel stay selected in the
+  filtered panel, and selections made while filtering (Ins, Shift+arrows,
+  Gray +/-, ...) are applied to the real panel when PaneFilter closes, including
+  items the filter currently hides.
 - `Del` jumps to the currently selected file in the real panel.
 - `Enter` on a directory closes the plugin and switches the real panel to that directory.
 - `Enter` on a file positions the real panel on it and opens it.
