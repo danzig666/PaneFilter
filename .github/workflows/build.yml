@@ -73,7 +73,6 @@ jobs:
                artifacts/PaneFilter-$arch/File_ID.diz \
                "PaneFilter macro.lua" README.md LICENSE "$dir/"
             (cd "package-$arch" && zip -r "../PaneFilter-${TAG}-$arch.zip" PaneFilter)
-            (cd artifacts/PaneFilter-$arch && zip "../../PaneFilter-${TAG}-$arch-pdb.zip" PaneFilter.pdb)
             # The bare files and their checksums are what "Check for updates" downloads.
             cp artifacts/PaneFilter-$arch/PaneFilter.dll "update/PaneFilter.$arch.dll"
           done
@@ -88,6 +87,4 @@ jobs:
           files: |
             PaneFilter-${{ env.TAG }}-x86.zip
             PaneFilter-${{ env.TAG }}-x64.zip
-            PaneFilter-${{ env.TAG }}-x86-pdb.zip
-            PaneFilter-${{ env.TAG }}-x64-pdb.zip
             update/*

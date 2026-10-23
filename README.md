@@ -63,7 +63,6 @@ Releases
 
 Pushing a tag named `vX.Y.Z`, or running the Build workflow manually with
 its `tag` input set, builds both variants and publishes a GitHub release with
-ready-to-install zips (plugin files, macro, README), separate PDB zips for
-debugging, and the bare `PaneFilter.x86.dll`, `PaneFilter.x64.dll`,
+ready-to-install zips (plugin files, macro, README) and the bare `PaneFilter.x86.dll`, `PaneFilter.x64.dll`,
 `PaneFilter_Eng.lng` and `PaneFilter_Eng.hlf` with `.sha256` checksums, which
 the updater downloads. Keep `src/version.hpp` in sync with the tag.
