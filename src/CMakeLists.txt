@@ -86,7 +86,7 @@ add_library(PaneFilter SHARED ${SRC_FILES})
 target_include_directories(PaneFilter
     PUBLIC ${PROJECT_SOURCE_DIR}/../farsdk/unicode
     )
-target_link_libraries(PaneFilter PRIVATE winhttp bcrypt psapi)
+target_link_libraries(PaneFilter PRIVATE winhttp bcrypt psapi normaliz)
 
 set_target_properties(PaneFilter PROPERTIES
     CXX_STANDARD 20
