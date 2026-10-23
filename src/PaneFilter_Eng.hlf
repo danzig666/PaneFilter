@@ -18,6 +18,12 @@ If the filter contains #*# or #?#, wildcard matching is used.
 #Alt+-# also types #*#.
 Characters that would leave the panel empty are ignored.
 
+Selection is kept between the real panel and PaneFilter. Files selected in
+the real panel are selected in PaneFilter too, and what you select or
+deselect while filtering is applied to the real panel when PaneFilter
+closes with #Esc#, #Backspace#, #Del# or #Enter# on a file. Selected items
+that the filter hides stay selected.
+
 #Enter#
 Close PaneFilter and act in the real panel.
 Directories change the real panel directory.

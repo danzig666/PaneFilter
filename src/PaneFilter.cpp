@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <cwctype>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -37,6 +38,9 @@ namespace
 		std::vector<size_t> FilteredIndices;
 		bool ShowHidden;
 		bool SkipRescan;
+		// Names selected in the real panel or in the filtered panel. Kept for items the filter hides
+		// and restored in the real panel on exit.
+		std::set<std::wstring> SelectedNames;
 		OPENPANELINFO_SORTMODES SortMode;
 		intptr_t SortOrder;
 	};
@@ -226,7 +230,7 @@ namespace
 	}
 
 
-	bool GetPanelItemName(HANDLE panel, size_t index, std::wstring& fileName)
+	bool GetPanelItemName(HANDLE panel, size_t index, std::wstring& fileName, bool* selected = nullptr)
 	{
 		const intptr_t requiredSize = PsInfo.PanelControl(panel, FCTL_GETPANELITEM, index, nullptr);
 		if (requiredSize <= 0)
@@ -245,7 +249,32 @@ namespace
 			return false;
 
 		fileName = panelItemInfo.Item->FileName;
+		if (selected)
+			*selected = (panelItemInfo.Item->Flags & PPIF_SELECTED) != 0;
 		return true;
+	}
+
+	// Records which of the items shown in the panel are selected. Items the panel does not show
+	// keep their recorded state.
+	void SyncSelectionFromPanel(PanelState& state, HANDLE panel)
+	{
+		PanelInfo panelInfo{};
+		panelInfo.StructSize = sizeof(panelInfo);
+		if (!PsInfo.PanelControl(panel, FCTL_GETPANELINFO, 0, &panelInfo))
+			return;
+
+		for (size_t index = 0; index < panelInfo.ItemsNumber; ++index)
+		{
+			std::wstring fileName;
+			bool selected = false;
+			if (!GetPanelItemName(panel, index, fileName, &selected) || fileName == L"..")
+				continue;
+
+			if (selected)
+				state.SelectedNames.insert(fileName);
+			else
+				state.SelectedNames.erase(fileName);
+		}
 	}
 
 	std::wstring EscapeLuaString(const std::wstring& text)
@@ -467,6 +496,8 @@ namespace
 		state.SortOrder = (panelInfo.Flags & PFLAGS_REVERSESORTORDER) != 0 ? 1 : 0;
 
 		GetPanelItemName(PANEL_ACTIVE, panelInfo.CurrentItem, state.CurrentName);
+		if (panelInfo.SelectedItemsNumber != 0)
+			SyncSelectionFromPanel(state, PANEL_ACTIVE);
 
 		if (!EnumerateDirectory(state, state.SourceDirectory))
 		{
@@ -513,6 +544,7 @@ namespace
 	// in the panel's sort order (for example the newest file when sorted by time).
 	void RefreshPanel(PanelState& state, HANDLE panel, const std::wstring& preferredName)
 	{
+		SyncSelectionFromPanel(state, panel);
 		RebuildFiltered(state);
 		UpdatePanelTitle(state);
 
@@ -545,19 +577,29 @@ namespace
 		PsInfo.MacroControl(&MainGuid, MCTL_SENDSTRING, MSSC_POST, &macro);
 	}
 
-	// FAR closes the plugin panel only after the current plugin call returns, so positioning
-	// the cursor in the real panel has to happen in a posted macro that runs afterwards.
-	void CloseAndPositionOn(HANDLE panel, const std::wstring& directory, const std::wstring& itemName, bool open)
+	// FAR closes the plugin panel only after the current plugin call returns, so positioning the
+	// cursor and restoring the selection in the real panel happen in a posted macro that runs afterwards.
+	void CloseAndPositionOn(PanelState& state, HANDLE panel, const std::wstring& itemName, bool open)
 	{
-		if (itemName.empty())
+		SyncSelectionFromPanel(state, panel);
+
+		const std::wstring& directory = state.SourceDirectory;
+		std::wstring macroText = L"local found = false ";
+		if (!itemName.empty())
+			macroText += L"found = Panel.SetPath(0, \"" + EscapeLuaString(directory) + L"\", \"" + EscapeLuaString(itemName) + L"\") ";
+
+		macroText += L"Panel.Select(0, 0, 0) ";
+		if (!state.SelectedNames.empty())
 		{
-			CloseToDirectory(panel, directory);
-			return;
+			macroText += L"for _, name in ipairs({";
+			for (const std::wstring& name : state.SelectedNames)
+				macroText += L"\"" + EscapeLuaString(name) + L"\",";
+			macroText += L"}) do Panel.Select(0, 1, 2, name) end ";
 		}
 
-		std::wstring macroText =
-			L"if Panel.SetPath(0, \"" + EscapeLuaString(directory) + L"\", \"" + EscapeLuaString(itemName) + L"\") then";
-		macroText += open ? L" Keys(\"Enter\") end" : L" end";
+		if (open)
+			macroText += L"if found then Keys(\"Enter\") end";
+
 		CloseAndRunLuaMacro(panel, directory, macroText);
 	}
 
@@ -753,6 +795,9 @@ extern "C" intptr_t WINAPI GetFindDataW(GetFindDataInfo* findDataInfo)
 
 	// FAR asks for fresh data after its own file operations (F5, F6, F8, ...), so rescan unless
 	// the request came from a plain filter change.
+	// Selection flags are only set on the plugin's own updates; after FAR's file operations FAR
+	// manages the selection itself.
+	const bool ownUpdate = state->SkipRescan;
 	if (state->SkipRescan)
 		state->SkipRescan = false;
 	else if ((findDataInfo->OpMode & OPM_FIND) == 0)
@@ -774,6 +819,8 @@ extern "C" intptr_t WINAPI GetFindDataW(GetFindDataInfo* findDataInfo)
 		items[visibleIndex].FileSize = entry.FileSize;
 		items[visibleIndex].LastWriteTime = entry.LastWriteTime;
 		items[visibleIndex].FileAttributes = entry.FileAttributes;
+		if (ownUpdate && state->SelectedNames.count(entry.Name) != 0)
+			items[visibleIndex].Flags |= PPIF_SELECTED;
 	}
 
 	findDataInfo->PanelItem = items;
@@ -823,7 +870,7 @@ extern "C" intptr_t WINAPI ProcessPanelInputW(const ProcessPanelInputInfo* proce
 		switch (key.wVirtualKeyCode)
 		{
 		case VK_ESCAPE:
-			CloseAndPositionOn(panel, state->SourceDirectory, state->CurrentName, false);
+			CloseAndPositionOn(*state, panel, state->CurrentName, false);
 			return TRUE;
 
 		case VK_BACK:
@@ -831,15 +878,15 @@ extern "C" intptr_t WINAPI ProcessPanelInputW(const ProcessPanelInputInfo* proce
 				state->FilterText.pop_back();
 
 			if (state->FilterText.empty())
-				CloseAndPositionOn(panel, state->SourceDirectory, state->CurrentName, false);
+				CloseAndPositionOn(*state, panel, state->CurrentName, false);
 			else
 				RefreshPanel(*state, panel, L"");
 			return TRUE;
 
 		case VK_DELETE:
 			CloseAndPositionOn(
+				*state,
 				panel,
-				state->SourceDirectory,
 				state->FilterText.empty() ? state->CurrentName : GetCurrentVisibleName(panel),
 				false);
 			return TRUE;
@@ -853,7 +900,7 @@ extern "C" intptr_t WINAPI ProcessPanelInputW(const ProcessPanelInputInfo* proce
 			if (entry->IsDirectory)
 				CloseToDirectory(panel, entry->FullPath);
 			else
-				CloseAndPositionOn(panel, state->SourceDirectory, entry->Name, true);
+				CloseAndPositionOn(*state, panel, entry->Name, true);
 			return TRUE;
 		}
 
@@ -898,7 +945,7 @@ extern "C" intptr_t WINAPI SetDirectoryW(const SetDirectoryInfo* setDirectoryInf
 	std::wstring target = setDirectoryInfo->Dir;
 	if (target == L"..")
 	{
-		CloseAndPositionOn(setDirectoryInfo->hPanel, state->SourceDirectory, state->CurrentName, false);
+		CloseAndPositionOn(*state, setDirectoryInfo->hPanel, state->CurrentName, false);
 		return TRUE;
 	}
 
