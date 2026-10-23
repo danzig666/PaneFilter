@@ -14,3 +14,8 @@ the GitHub tools and fix any errors before reporting the work as done.
 Cloud sessions can only push their own branch, not tags. To release, merge to `main`, then
 dispatch the `build.yml` workflow on `main` with the `tag` input (e.g. `v1.2.0`); the
 `release` job creates the tag and the GitHub release with the zips. Bump `src/version.hpp` first.
+
+## Standing instruction from the owner
+
+When a change is done and CI is green, always merge it to `main` and publish a release
+(bump `src/version.hpp`, then dispatch the release as described above) without asking first.

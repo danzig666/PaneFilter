@@ -40,3 +40,13 @@ endfunction()
 
 plugin_extract_version()
 add_subdirectory(./src)
+
+option(PANEFILTER_BUILD_TESTS "Build the unit tests" OFF)
+if (PANEFILTER_BUILD_TESTS)
+  add_executable(match_tests tests/MatchTests.cpp src/Matching.cpp)
+  target_include_directories(match_tests PRIVATE src)
+  target_link_libraries(match_tests PRIVATE normaliz)
+  target_compile_options(match_tests PRIVATE /utf-8)
+  target_compile_definitions(match_tests PRIVATE UNICODE _UNICODE NOMINMAX)
+  set_target_properties(match_tests PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED YES)
+endif ()

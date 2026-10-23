@@ -2,8 +2,19 @@ project(PaneFilter CXX)
 
 set(SRC_CPP
     PaneFilter.cpp
+    FarApi.cpp
+    FarApi.hpp
     FarLang.h
-    guid.hpp
+    Guids.hpp
+    Matching.cpp
+    Matching.hpp
+    Updater.cpp
+    Updater.hpp
+    UpdaterConfig.hpp
+    core/Json.cpp
+    core/Json.hpp
+    core/Text.cpp
+    core/Text.hpp
     version.hpp
     PaneFilter.rc)
 
@@ -26,7 +37,8 @@ if (CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
     set(LINK_FLAGS "${LINK_FLAGS} /incremental:no /OPT:REF /OPT:ICF /debug /ltcg")
   endif ()
 
-  add_definitions(-DUNICODE -D_UNICODE)
+  add_definitions(-DUNICODE -D_UNICODE -DNOMINMAX)
+  add_compile_options(/utf-8)
 
   if (IS_x64_PLATFORM)
     set(CMAKE_RC_FLAGS -D_WIN64)
@@ -74,9 +86,10 @@ add_library(PaneFilter SHARED ${SRC_FILES})
 target_include_directories(PaneFilter
     PUBLIC ${PROJECT_SOURCE_DIR}/../farsdk/unicode
     )
+target_link_libraries(PaneFilter PRIVATE winhttp bcrypt psapi normaliz)
 
 set_target_properties(PaneFilter PROPERTIES
-    CXX_STANDARD 11
+    CXX_STANDARD 20
     CXX_STANDARD_REQUIRED YES
     CXX_EXTENSIONS NO
     )

@@ -7,7 +7,7 @@
 #endif
 
 #define PLUGIN_VER_MAJOR 1
-#define PLUGIN_VER_MINOR 0
+#define PLUGIN_VER_MINOR 1
 #define PLUGIN_VER_PATCH 0
 #define PLUGIN_DESC L"PaneFilter for Far Manager 3" PLATFORM
 #define PLUGIN_NAME L"PaneFilter"

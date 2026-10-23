@@ -1,4 +1,4 @@
-.Language=English,English
+﻿.Language=English,English
 .PluginContents=Contents
 .Options CtrlStartPosChar=^<wrap>
 
@@ -11,7 +11,9 @@ It can be started from the plugins menu, from a macro, or from the
 command line with the #panefilter:# prefix (for example #panefilter:*.txt#).
 
 Type to filter the panel contents.
-Matching is case-insensitive.
+Matching ignores case and accents: #e# also finds #é#, #o# also finds #ő#.
+After each change of the filter the cursor goes to the first item in the
+panel's sort order, for example the newest file when sorted by time.
 If the filter contains #*# or #?#, wildcard matching is used.
 #Alt+-# also types #*#.
 Characters that would leave the panel empty are ignored.
@@ -37,3 +39,12 @@ Close PaneFilter and return to the original directory and item.
 
 Other FAR file operations (F3, F4, F5, F6, F8, ...) work on the real files;
 the panel is rescanned afterwards.
+
+#Updates#
+F11 > #PaneFilter: Check for updates# asks GitHub for the latest release.
+If there is a newer one, #Update now# downloads it, checks its SHA-256
+checksums and replaces the plugin while FAR keeps running. Restart FAR to
+use the new version. The old DLL is kept as #PaneFilter.dll.<version>-<time>.old#
+and deleted automatically once no running FAR has it loaded.
+The plugin must be in a folder you can write to, such as
+#%FARPROFILE%\Plugins#.
